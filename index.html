@@ -247,7 +247,7 @@ footer{
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
       LBMA 공식 고시가
     </a>
-    <a class="linkbtn" href="https://www.kebhana.com/cont/mall/mall15/mall1501/index.jsp" target="_blank" rel="noopener">
+    <a class="linkbtn" id="hana-link" href="https://m.kebhana.com/" target="_blank" rel="noopener">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
       하나은행 환율
     </a>
@@ -585,6 +585,14 @@ function updateKstLabels(){
   $('kst-am').textContent = londonToKstLabel(10, 30);
   $('kst-pm').textContent = londonToKstLabel(15, 0);
 }
+// Route to the mobile or desktop Hana Bank page depending on device
+(function setHanaLink(){
+  const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+  $('hana-link').href = isMobile
+    ? 'https://m.kebhana.com/'
+    : 'https://www.kebhana.com/cont/mall/mall15/mall1501/index.jsp';
+})();
+
 updateKstLabels();
 
 if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
