@@ -446,23 +446,32 @@ function setActiveRateTab(slot){
   });
 }
 
-async function fetchRateBySlot(slot){
-  const hint = $('rate-source-hint');
-  const tabBtn = $('rate-tab-' + slot);
-  const tabDot = $('rate-tab-' + slot + '-dot');
-  const otherTabs = ['now','0900','1400'].filter((s) => s !== slot).map((s) => $('rate-tab-' + s));
+let rateFetchToken = 0;
+let rateFetchAbort = null;
 
-  tabBtn.disabled = true;
-  otherTabs.forEach((b) => b.disabled = true);
+async function fetchRateBySlot(slot){
+  const myToken = ++rateFetchToken;
+  if (rateFetchAbort) rateFetchAbort.abort();
+  const controller = new AbortController();
+  rateFetchAbort = controller;
+
+  const hint = $('rate-source-hint');
+  const tabDot = $('rate-tab-' + slot + '-dot');
+
+  ['now','0900','1400'].forEach((s) => { $('rate-tab-' + s + '-dot').style.display = 'none'; });
   tabDot.style.display = 'inline-block';
   hint.style.color = 'var(--muted)';
-  hint.textContent = slot === 'now' ? '실시간 환율 조회 중…' : '저장된 값 불러오는 중…';
+  hint.textContent = slot === 'now' ? '실시간 환율 조회 중… (탭을 계속 눌러도 돼요)' : '저장된 값 불러오는 중…';
+
+  const timeoutId = setTimeout(() => controller.abort(), slot === 'now' ? 25000 : 12000);
 
   try {
     const url = slot === 'now' ? HANA_RATE_API : (HANA_RATE_API + '?time=' + slot);
-    const res = await fetch(url, { signal: AbortSignal.timeout(slot === 'now' ? 25000 : 12000) });
+    const res = await fetch(url, { signal: controller.signal });
+    if (myToken !== rateFetchToken) return false; // a newer tab click superseded this one
     if (!res.ok) throw new Error('서버 응답 오류');
     const data = await res.json();
+    if (myToken !== rateFetchToken) return false;
     if (!data.success || typeof data.rate !== 'number') throw new Error(data.error || '값 없음');
 
     $('in-rate').value = data.rate.toFixed(2);
@@ -471,11 +480,13 @@ async function fetchRateBySlot(slot){
     hint.style.color = 'var(--gold-bright)';
     return true;
   } catch (e) {
+    if (myToken !== rateFetchToken) return false; // superseded; ignore silently
     console.error(e);
     // Fallback only for the real-time tab: ECB reference rate
     if (slot === 'now') {
       try {
         const fxRes = await fetch('https://api.frankfurter.dev/v1/latest?base=USD&symbols=KRW', { signal: AbortSignal.timeout(15000) });
+        if (myToken !== rateFetchToken) return false;
         if (fxRes.ok) {
           const fxData = await fxRes.json();
           const rate = fxData.rates && fxData.rates.KRW;
@@ -488,13 +499,12 @@ async function fetchRateBySlot(slot){
         }
       } catch (e2) { console.error(e2); }
     }
-    hint.textContent = '● 조회 실패, 직접 입력해 주세요 (' + e.message + ')';
+    hint.textContent = '● 조회 실패, 직접 입력해 주세요 (' + (e.name === 'AbortError' ? '시간 초과' : e.message) + ')';
     hint.style.color = 'var(--danger)';
     return false;
   } finally {
-    tabBtn.disabled = false;
-    otherTabs.forEach((b) => b.disabled = false);
-    tabDot.style.display = 'none';
+    clearTimeout(timeoutId);
+    if (myToken === rateFetchToken) tabDot.style.display = 'none';
   }
 }
 
@@ -508,8 +518,9 @@ async function fetchRateBySlot(slot){
 // Kept for backward compatibility with the page-load orchestrator below
 async function fetchRateOnly(){ return fetchRateBySlot('now'); }
 
-async function fetchSpotGoldOnly(timeoutMs){
-  const goldRes = await fetch('https://api.gold-api.com/price/XAU', { signal: AbortSignal.timeout(timeoutMs) });
+async function fetchSpotGoldOnly(timeoutMs, externalSignal){
+  const signal = externalSignal ? AbortSignal.any([externalSignal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs);
+  const goldRes = await fetch('https://api.gold-api.com/price/XAU', { signal });
   if (!goldRes.ok) throw new Error('금 시세 조회 실패 (' + goldRes.status + ')');
   const goldData = await goldRes.json();
   const price = goldData.price;
@@ -524,8 +535,9 @@ async function fetchSpotGoldOnly(timeoutMs){
 const OFFICIAL_LBMA_API = 'https://gold-calculator-eight-liard.vercel.app/api/lbma-price';
 
 // Core fetch+fill logic, reusable by both the manual button and page-load auto-fill.
-async function fetchOfficialGold(timeoutMs){
-  const res = await fetch(OFFICIAL_LBMA_API, { signal: AbortSignal.timeout(timeoutMs) });
+async function fetchOfficialGold(timeoutMs, externalSignal){
+  const signal = externalSignal ? AbortSignal.any([externalSignal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs);
+  const res = await fetch(OFFICIAL_LBMA_API, { signal });
   if (!res.ok) throw new Error('서버 응답 오류 (' + res.status + ')');
   const data = await res.json();
   if (!data.success) throw new Error(data.error || '값을 가져오지 못했어요.');
@@ -544,6 +556,8 @@ async function fetchOfficialGold(timeoutMs){
 }
 
 let activeGoldSource = 'official'; // 'official' | 'spot'
+let goldFetchToken = 0;
+let goldFetchAbort = null;
 
 function setActiveTab(source){
   activeGoldSource = source;
@@ -555,26 +569,32 @@ function setActiveTab(source){
 $('tab-official').addEventListener('click', () => { setActiveTab('official'); fetchGoldBySource('official'); });
 $('tab-spot').addEventListener('click', () => { setActiveTab('spot'); fetchGoldBySource('spot'); });
 
-// Fetches gold price using the given source, wiring up the tab buttons + status UI.
+// Fetches gold price using the given source, wiring up the tab dots + status UI.
+// Tabs stay clickable at all times; clicking a new one cancels any still-running fetch.
 async function fetchGoldBySource(source){
-  const tabBtn = $(source === 'official' ? 'tab-official' : 'tab-spot');
+  const myToken = ++goldFetchToken;
+  if (goldFetchAbort) goldFetchAbort.abort();
+  const controller = new AbortController();
+  goldFetchAbort = controller;
+
   const tabDot = $(source === 'official' ? 'tab-official-dot' : 'tab-spot-dot');
-  const otherBtn = $(source === 'official' ? 'tab-spot' : 'tab-official');
   const status = $('fetch-status');
 
-  tabBtn.disabled = true;
-  otherBtn.disabled = true;
+  $('tab-official-dot').style.display = 'none';
+  $('tab-spot-dot').style.display = 'none';
   tabDot.style.display = 'inline-block';
   status.className = 'fetch-status';
   status.style.display = 'block';
 
   const isOfficial = source === 'official';
-  status.textContent = isOfficial ? '공식 고시가 조회 중… (최대 20초)' : '스팟가 조회 중…';
+  status.textContent = isOfficial ? '공식 고시가 조회 중… (최대 20초, 다른 탭을 눌러도 돼요)' : '스팟가 조회 중…';
 
   try {
     const data = isOfficial
-      ? await fetchOfficialGold(20000)
-      : await fetchSpotGoldOnly(15000);
+      ? await fetchOfficialGold(20000, controller.signal)
+      : await fetchSpotGoldOnly(15000, controller.signal);
+
+    if (myToken !== goldFetchToken) return false; // a newer click superseded this one
 
     status.textContent = isOfficial
       ? '✓ 공식 LBMA 고시가로 채웠어요' + (data.note ? ' · ' + data.note : '') + '.'
@@ -583,6 +603,7 @@ async function fetchGoldBySource(source){
     if (typeof updateKrwHints === 'function') updateKrwHints();
     return true;
   } catch (e) {
+    if (myToken !== goldFetchToken) return false; // superseded; ignore silently
     console.error(e);
     status.className = 'fetch-status err';
     status.textContent = e.name === 'TimeoutError' || e.name === 'AbortError'
@@ -590,9 +611,7 @@ async function fetchGoldBySource(source){
       : (isOfficial ? '공식 고시가를 가져오지 못했어요' : '스팟가 조회에 실패했어요') + ' (' + e.message + ').';
     return false;
   } finally {
-    tabBtn.disabled = false;
-    otherBtn.disabled = false;
-    tabDot.style.display = 'none';
+    if (myToken === goldFetchToken) tabDot.style.display = 'none';
   }
 }
 
