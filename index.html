@@ -461,7 +461,7 @@ async function fetchRateBySlot(slot){
   ['now','0900','1400'].forEach((s) => { $('rate-tab-' + s + '-dot').style.display = 'none'; });
   tabDot.style.display = 'inline-block';
   hint.style.color = 'var(--muted)';
-  hint.textContent = slot === 'now' ? '실시간 환율 조회 중… (탭을 계속 눌러도 돼요)' : '저장된 값 불러오는 중…';
+  hint.textContent = slot === 'now' ? '실시간 환율 조회 중…' : '저장된 값 불러오는 중…';
 
   const timeoutId = setTimeout(() => controller.abort(), slot === 'now' ? 25000 : 12000);
 
@@ -475,7 +475,7 @@ async function fetchRateBySlot(slot){
     if (!data.success || typeof data.rate !== 'number') throw new Error(data.error || '값 없음');
 
     $('in-rate').value = data.rate.toFixed(2);
-    const labelBySlot = { now: '● 하나은행 매매기준율 (실시간)', '0900': '● 하나은행 오전 9시 저장값', '1400': '● 하나은행 오후 2시 저장값' };
+    const labelBySlot = { now: '● 하나은행 매매기준율 (실시간)', '0900': '● 하나은행 오전 9시 기준 환율', '1400': '● 하나은행 오후 2시 기준 환율' };
     hint.textContent = labelBySlot[slot] + (data.note ? ' · ' + data.note : '');
     hint.style.color = 'var(--gold-bright)';
     return true;
@@ -587,7 +587,7 @@ async function fetchGoldBySource(source){
   status.style.display = 'block';
 
   const isOfficial = source === 'official';
-  status.textContent = isOfficial ? '공식 고시가 조회 중… (최대 20초, 다른 탭을 눌러도 돼요)' : '스팟가 조회 중…';
+  status.textContent = isOfficial ? '공식 고시가 조회 중…' : '스팟가 조회 중…';
 
   try {
     const data = isOfficial
@@ -596,9 +596,7 @@ async function fetchGoldBySource(source){
 
     if (myToken !== goldFetchToken) return false; // a newer click superseded this one
 
-    status.textContent = isOfficial
-      ? '✓ 공식 LBMA 고시가로 채웠어요' + (data.note ? ' · ' + data.note : '') + '.'
-      : '✓ 실시간 스팟가로 채웠어요.';
+    status.textContent = isOfficial ? '공식 LBMA 고시가' : '스팟가';
     setSourceBadge(source);
     if (typeof updateKrwHints === 'function') updateKrwHints();
     return true;
