@@ -272,6 +272,12 @@ footer{
       <span>실시간 스팟 가격이며, 공식 LBMA AM/PM 확정 고시가와는 다를 수 있어요.</span>
     </div>
 
+    <button class="btn-fetch" id="btn-fetch-official" style="border-color:var(--gold); background:rgba(201,162,74,0.1);">
+      <span class="dot" id="fetch-official-dot" style="display:none;"></span>
+      <span id="fetch-official-label">⛁ 공식 LBMA 고시가 가져오기 (10~20초, 베타)</span>
+    </button>
+    <div class="fetch-status" id="fetch-official-status"></div>
+
     <div class="field">
       <label><b>AM 고시가</b> (런던 10:30<span id="kst-am"></span>, 1 troy oz)</label>
       <div class="input-row">
@@ -421,6 +427,55 @@ async function fetchLive(isAuto) {
 }
 
 $('btn-fetch').addEventListener('click', () => fetchLive(false));
+
+const OFFICIAL_LBMA_API = 'https://gold-calculator-eight-liard.vercel.app/api/lbma-price';
+
+$('btn-fetch-official').addEventListener('click', async () => {
+  const btn = $('btn-fetch-official');
+  const dot = $('fetch-official-dot');
+  const label = $('fetch-official-label');
+  const status = $('fetch-official-status');
+
+  btn.disabled = true;
+  dot.style.display = 'inline-block';
+  label.textContent = '공식 고시가 불러오는 중… (최대 20초)';
+  status.className = 'fetch-status';
+  status.style.display = 'block';
+  status.textContent = '';
+
+  try {
+    const res = await fetch(OFFICIAL_LBMA_API, { signal: AbortSignal.timeout(30000) });
+    if (!res.ok) throw new Error('서버 응답 오류 (' + res.status + ')');
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error || '값을 가져오지 못했어요.');
+
+    if (typeof data.am === 'number') $('in-am').value = data.am;
+    if (typeof data.pm === 'number') $('in-pm').value = data.pm;
+    if (data.date) {
+      // date comes back as "DD/MM" from the LBMA page; convert to this year's YYYY-MM-DD
+      const m = data.date.match(/^(\d{2})\/(\d{2})$/);
+      if (m) {
+        const yyyy = new Date().getFullYear();
+        $('in-date').value = `${yyyy}-${m[2]}-${m[1]}`;
+      }
+    }
+
+    status.className = 'fetch-status';
+    status.textContent = '✓ 공식 LBMA 고시가로 채웠어요' + (data.note ? ' · ' + data.note : '') + '. 환율은 직접 확인해서 넣어주세요.';
+    if (typeof updateKrwHints === 'function') updateKrwHints();
+  } catch (e) {
+    console.error(e);
+    status.className = 'fetch-status err';
+    status.textContent = e.name === 'TimeoutError' || e.name === 'AbortError'
+      ? '20초 안에 응답이 없어 중단했어요. 잠시 후 다시 시도해 주세요.'
+      : '공식 고시가를 가져오지 못했어요 (' + e.message + ').';
+  } finally {
+    btn.disabled = false;
+    dot.style.display = 'none';
+    label.textContent = '⛁ 공식 LBMA 고시가 가져오기 (10~20초, 베타)';
+  }
+});
+
 
 const UNIT_TO_KG = { g: 0.001, kg: 1, t: 1000 };
 const UNIT_LABEL = { g: 'g', kg: 'KG', t: 't' };
